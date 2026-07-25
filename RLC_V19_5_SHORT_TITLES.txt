@@ -1,6 +1,0 @@
-RED LOBSTER CULT v19.5 - SHORT TITLES
-
-- Shortened all 21 Cult badge titles used by the main addon.
-- Every main-addon title is now 12 characters or fewer.
-- Existing earned and equipped titles remain valid because title IDs are unchanged.
-- Pairs with RedLobsterCultAchievements v3.4.
