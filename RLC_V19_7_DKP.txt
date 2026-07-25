@@ -1,9 +1,0 @@
-RED LOBSTER CULT v19.7 - DKP
-
-- Added a full DKP category with Roster, Raid, and History sections.
-- Added /dkp standalone window and /dkp compact raid list.
-- Added character-bound balances capped at 5,000 DKP.
-- Added Add, Deduct, and Set controls for guild and raid members.
-- Added raid-wide presets and custom raid adjustments.
-- Added synchronized balances, recent history, and spreadsheet-ready exports.
-- No guild-note editing and no loot-priority system.
