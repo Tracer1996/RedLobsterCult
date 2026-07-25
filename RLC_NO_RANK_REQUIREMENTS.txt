@@ -1,0 +1,9 @@
+RED LOBSTER CULT - NO RANK REQUIREMENTS BUILD
+================================================
+
+- The addon opens for every player regardless of guild rank name.
+- All members may create raid events and guild events.
+- All members may request all guild-bank item categories.
+- Shoutout limits are uniform and use the configured daily value.
+- Event management remains with the event creator; guild officers may also manage.
+- Destructive or guild-wide administration uses native WoW guild permissions, not named ranks.

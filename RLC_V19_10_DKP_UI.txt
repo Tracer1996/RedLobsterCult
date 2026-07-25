@@ -1,0 +1,8 @@
+RED LOBSTER CULT v19.10 - DKP UI
+
+- DKP adjustment and export dialogs now always appear above the main addon panel.
+- Compact Raid DKP is a narrow, single-column vertical player list.
+- Long raids scroll vertically with the mouse wheel.
+- Added a smooth bottom-right resize grip.
+- Compact width and height persist between sessions.
+- Locking the compact frame also locks its resize grip.

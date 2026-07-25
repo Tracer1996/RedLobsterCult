@@ -1,0 +1,8 @@
+RED LOBSTER CULT v19.4 - LAYOUT AND ACHIEVEMENTS INTEGRATION
+
+- Hardcoded the approved 52-element /config layout.
+- Migrates older per-character layout positions to the approved v19.4 layout once.
+- /config reset now restores the approved layout.
+- Added forced drag cleanup on mouse release and when /config closes.
+- Added canonical RedLobsterCultAchievements API and texture integration.
+- Removed the duplicate nested addon folder from the packaged build.

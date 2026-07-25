@@ -1,0 +1,12 @@
+Red Lobster Cult v19.4
+
+- Fixed dossier layout shifting after cycling the character specialization.
+- Removed the Raise the Banner / Raise the Claw button and animated flag from the main window.
+- All top category tabs now always display the universal TGA artwork.
+- Active category and subcategory tabs remain visibly highlighted.
+- Added universal TGA mappings for every Cult Duties, Calendar, and Options subcategory.
+- Increased spacing and widths for category and subcategory navigation.
+- Clicking Cult Duties now always opens Reputation first.
+- Reset only old saved navigation offsets so the new spacing applies without erasing dossier customization.
+- Rewrote weekly duties with serious Red Lobster Cult rites and added duty-request metrics.
+- Bumped the duty template version so current weekly duties regenerate with the new names.
