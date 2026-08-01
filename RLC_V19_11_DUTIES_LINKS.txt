@@ -1,9 +1,0 @@
-RED LOBSTER CULT v19.11 - DUTIES, TITLES, AND LINK COMPATIBILITY
-
-- Renamed Weekly Rites to Weekly Duties and rewrote every goal in plain English.
-- Weekly offering goals now count Bulletin Board posts, completed helper tasks, and confirmed task completions instead of legacy work orders.
-- Replaced stale work-order guide copy with the Bulletin Board and Cult Rep flow.
-- Renamed Banner Signals to Cult Decrees.
-- Clarified title sources: Achievements provide chat titles; badges provide leaderboard/dossier titles.
-- Badge and badge-title chat links now open the same stationary custom info panel used by achievement links.
-- Improved hyperlink hook compatibility so AtlasLoot and other addon links can use their own click handlers.

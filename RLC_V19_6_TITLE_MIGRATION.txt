@@ -1,7 +1,0 @@
-Red Lobster Cult v19.6
-
-- Migrates existing equipped titles and title-cache records to stable IDs.
-- Converts legacy long title names to the approved short title definitions.
-- Keeps earned badges and equipped-title choices intact.
-- Normalizes equipped titles again at display and broadcast time so old cached
-  records cannot restore a long title in guild chat.
