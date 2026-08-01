@@ -368,11 +368,11 @@ local GRPAWARD_GRACE_PERIOD = 60      -- seconds non-broadcasters wait for the g
 local WEEKEND_POINT_MULTIPLIER = 2    -- LP multiplier applied on Saturday/Sunday
 RLC.allianceRosterBroadcasterTTL = 90
 
-local SEASON_REWARD_1 = 5
-local SEASON_REWARD_2 = 4
-local SEASON_REWARD_3 = 3
-local SEASON_REWARD_4 = 2
-local SEASON_REWARD_5 = 1
+local SEASON_REWARD_1 = 25
+local SEASON_REWARD_2 = 20
+local SEASON_REWARD_3 = 15
+local SEASON_REWARD_4 = 10
+local SEASON_REWARD_5 = 5
 
 RLC.weeklyRecapNoteText = "These are the champions of the Red Lobster Cult. Stand with your guildmates, carve your legacy, and rise with the Cult."
 RLC.weeklyRecapRankMessageTemplates = {
@@ -1599,9 +1599,9 @@ end
 function RLC:FormatSeasonGoldReward(amount)
   local value = tonumber(amount) or 0
   if value <= 0 then
-    return "No purse"
+    return "No DKP"
   end
-  return tostring(value) .. "g"
+  return tostring(value) .. " dkp"
 end
 
 
@@ -1644,9 +1644,9 @@ end
 function RLC:FormatSeasonGoldReward(amount)
   local value = tonumber(amount) or 0
   if value <= 0 then
-    return "No purse"
+    return "No DKP"
   end
-  return tostring(value) .. "g"
+  return tostring(value) .. " dkp"
 end
 
 local function EncodeTalentField(text)
@@ -3855,13 +3855,13 @@ local function EnsureDB()
   if RLC_DB.options.seasonReward3 == nil then RLC_DB.options.seasonReward3 = SEASON_REWARD_3 end
   if RLC_DB.options.seasonReward4 == nil then RLC_DB.options.seasonReward4 = SEASON_REWARD_4 end
   if RLC_DB.options.seasonReward5 == nil then RLC_DB.options.seasonReward5 = SEASON_REWARD_5 end
-  if not RLC_DB.options.seasonRewardsActivated_163 then
+  if not RLC_DB.options.seasonRewardsActivated_164 then
     RLC_DB.options.seasonReward1 = SEASON_REWARD_1
     RLC_DB.options.seasonReward2 = SEASON_REWARD_2
     RLC_DB.options.seasonReward3 = SEASON_REWARD_3
     RLC_DB.options.seasonReward4 = SEASON_REWARD_4
     RLC_DB.options.seasonReward5 = SEASON_REWARD_5
-    RLC_DB.options.seasonRewardsActivated_163 = true
+    RLC_DB.options.seasonRewardsActivated_164 = true
   end
   if not RLC_DB.options.shoutoutPointsActivated_163 then
     RLC_DB.options.shoutoutPoints = 100
@@ -13329,6 +13329,16 @@ RLC_GuildEventCategoryOrder = RLC_GuildEventCategoryOrder or {
   "Other",
 }
 
+RLC_GuildEventCategoryColor = {
+  ["Guild Meeting"] = "88CCFF",
+  ["Dungeon Run"] = "FFD700",
+  ["PvP"] = "CC88FF",
+  ["World Boss"] = "FF6666",
+  ["Farming"] = "88FF88",
+  ["Social"] = "FF88CC",
+  ["Other"] = "AAAAAA",
+}
+
 function NormalizeGuildEventCategory(value)
   local category = Trim(tostring(value or ""))
   if category == "" then
@@ -15655,6 +15665,34 @@ function RLC:GetWeeklyRecapRewards()
   }
 end
 
+function RLC:ApplyWeeklyRecapDKP(wk, snapshot)
+  if not (RLC and RLC.DKP and RLC.DKP.StoreTransaction) then return end
+  if not (RLC.IsAdminRank and RLC:IsAdminRank()) then return end
+  local ordinals = {"1st", "2nd", "3rd", "4th", "5th"}
+  for i = 1, table.getn(snapshot.entries or {}) do
+    local entry = snapshot.entries[i]
+    if entry and entry.name and (tonumber(entry.reward) or 0) > 0 then
+      local name = ShortName(entry.name)
+      local currentBalance = tonumber(RLC.DKP:GetBalance(name)) or 0
+      local reward = tonumber(entry.reward) or 0
+      local after = currentBalance + reward
+      if after > RLC.DKP.CAP then after = RLC.DKP.CAP end
+      local tx = {
+        id = "WEEKLY:" .. tostring(wk) .. ":R" .. tostring(entry.rank or i) .. ":" .. name,
+        operation = "ADD",
+        name = name,
+        amount = reward,
+        before = currentBalance,
+        after = after,
+        timestamp = Now(),
+        actor = "WeeklyRecap",
+        reason = "Weekly season reward (" .. tostring(ordinals[entry.rank or i] or (entry.rank or i)) .. ")",
+      }
+      RLC.DKP:StoreTransaction(tx, false)
+    end
+  end
+end
+
 function GetWeeklyRecapMessageVariantIndex(seedText, variantCount)
   local count = tonumber(variantCount) or 0
   if count < 2 then
@@ -15840,6 +15878,8 @@ function RLC:SnapshotWeeklyLeaderboardWinner(wk, capturedAt, forceReplace)
     return existing
   end
 
+  local wasApplied = type(existing) == "table" and existing.dkpApplied
+
   local leaders = self:GetWeeklyLeaderboardLeadersForWeek(wk)
   local winner = leaders[1]
   if not winner then
@@ -15873,7 +15913,13 @@ function RLC:SnapshotWeeklyLeaderboardWinner(wk, capturedAt, forceReplace)
     reward = tonumber(rewards[1]) or 0,
     entries = entries,
     capturedAt = tonumber(capturedAt) or Now(),
+    dkpApplied = wasApplied,
   }
+
+  if not snapshot.dkpApplied then
+    snapshot.dkpApplied = true
+    self:ApplyWeeklyRecapDKP(wk, snapshot)
+  end
 
   recap.byWeek[wk] = snapshot
   local lastWinnerWeek = tonumber(recap.lastWinnerWeek) or 0
@@ -33926,9 +33972,9 @@ function BuildMyPanel(panel)
 
   local seasonRewards = panel:CreateFontString(nil, "OVERLAY", "GameFontHighlight")
   seasonRewards:SetPoint("TOPLEFT", seasonRewardsLabel, "BOTTOMLEFT", 0, -4)
-  seasonRewards:SetWidth(maxWidth)
+  seasonRewards:SetWidth(260)
   seasonRewards:SetJustifyH("LEFT")
-  seasonRewards:SetText("|cFFFFD7001st: 5g|r  |  |cFFC0C0C02nd: 4g|r  |  |cFFCD7F323rd: 3g|r\n|cFFB8B8B84th: 2g|r  |  |cFF9C9C9C5th: 1g|r")
+  seasonRewards:SetText("|cFFFFD7001st: " .. tostring(SEASON_REWARD_1) .. " dkp|r  |  |cFFC0C0C02nd: " .. tostring(SEASON_REWARD_2) .. " dkp|r\n|cFFCD7F323rd: " .. tostring(SEASON_REWARD_3) .. " dkp|r  |  |cFFB8B8B84th: " .. tostring(SEASON_REWARD_4) .. " dkp|r\n|cFF9C9C9C5th: " .. tostring(SEASON_REWARD_5) .. " dkp|r")
   panel.seasonRewards = seasonRewards
   
   -- Week Countdown (styled like other stats) - MOVE TO RIGHT SIDE
@@ -40373,11 +40419,12 @@ function RLC.UI:Refresh()
     -- Refresh Season Rewards display
     if self.panels.me.seasonRewards then
       local rewards = RLC:GetWeeklyRecapRewards()
+      self.panels.me.seasonRewards:SetWidth(260)
       self.panels.me.seasonRewards:SetText(
         "|cFFFFD7001st: " .. RLC:FormatSeasonGoldReward(rewards[1]) .. "|r  |  " ..
-        "|cFFC0C0C02nd: " .. RLC:FormatSeasonGoldReward(rewards[2]) .. "|r  |  " ..
-        "|cFFCD7F323rd: " .. RLC:FormatSeasonGoldReward(rewards[3]) .. "|r\n" ..
-        "|cFFB8B8B84th: " .. RLC:FormatSeasonGoldReward(rewards[4]) .. "|r  |  " ..
+        "|cFFC0C0C02nd: " .. RLC:FormatSeasonGoldReward(rewards[2]) .. "|r\n" ..
+        "|cFFCD7F323rd: " .. RLC:FormatSeasonGoldReward(rewards[3]) .. "|r  |  " ..
+        "|cFFB8B8B84th: " .. RLC:FormatSeasonGoldReward(rewards[4]) .. "|r\n" ..
         "|cFF9C9C9C5th: " .. RLC:FormatSeasonGoldReward(rewards[5]) .. "|r"
       )
     end
@@ -43208,10 +43255,102 @@ function RLC_RaidUICreateEditBox(parent, width, height)
   input:SetFontObject(GameFontHighlightSmall)
   input:SetJustifyH("LEFT")
   input:SetText("")
+  input.lastText = ""
+  input:SetScript("OnTextChanged", function()
+    this.lastText = this:GetText() or ""
+  end)
   input:SetScript("OnEscapePressed", function()
     this:ClearFocus()
   end)
   return bg, input
+end
+
+function RLC_RaidUIGetEditBoxText(editBox)
+  if not editBox then return "" end
+  local text = editBox:GetText() or editBox.lastText or ""
+  text = string.gsub(text, "%z", "")
+  return text
+end
+
+RLC_RaidUITimeZones = {
+  {label = "Server", value = "server", offset = "server"},
+  {label = "UTC", value = 0, offset = 0},
+  {label = "EST", value = -18000, offset = -18000},
+  {label = "CST", value = -21600, offset = -21600},
+  {label = "MST", value = -25200, offset = -25200},
+  {label = "PST", value = -28800, offset = -28800},
+  {label = "AEST", value = 36000, offset = 36000},
+  {label = "CET", value = 3600, offset = 3600},
+}
+
+function RLC_RaidUICreateDropdown(parent, width, height, options, defaultIndex, onChange)
+  local dropdown = CreateFrame("Frame", nil, parent)
+  dropdown:SetWidth(width)
+  dropdown:SetHeight(height)
+  dropdown.options = options or {}
+  dropdown.selectedIndex = defaultIndex or 1
+  dropdown.onChange = onChange
+
+  local button = CreateFrame("Button", nil, dropdown, "UIPanelButtonTemplate")
+  button:SetWidth(width)
+  button:SetHeight(height)
+  button:SetPoint("TOPLEFT", dropdown, "TOPLEFT", 0, 0)
+  dropdown.button = button
+
+  local list = CreateFrame("Frame", nil, dropdown)
+  list:SetWidth(width)
+  list:SetHeight((table.getn(options or {}) * (height - 2)) + 8)
+  list:SetPoint("TOPLEFT", button, "BOTTOMLEFT", 0, -2)
+  list:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = true,
+    tileSize = 16,
+    edgeSize = 8,
+    insets = {left = 3, right = 3, top = 3, bottom = 3}
+  })
+  list:SetBackdropColor(0, 0, 0, 0.95)
+  list:SetFrameStrata("DIALOG")
+  list:Hide()
+  dropdown.list = list
+
+  for i, opt in ipairs(options or {}) do
+    local optBtn = CreateFrame("Button", nil, list, "UIPanelButtonTemplate")
+    optBtn:SetWidth(width - 8)
+    optBtn:SetHeight(height - 2)
+    optBtn:SetPoint("TOPLEFT", list, "TOPLEFT", 4, -4 - ((i - 1) * (height - 2)))
+    optBtn:SetText(opt.label or "")
+    optBtn.optionIndex = i
+    optBtn:SetScript("OnClick", function()
+      local dd = this:GetParent():GetParent()
+      dd.selectedIndex = this.optionIndex
+      dd.button:SetText(dd.options[this.optionIndex].label or "")
+      if dd.onChange then
+        dd.onChange(dd.options[this.optionIndex].value)
+      end
+      dd.list:Hide()
+    end)
+  end
+
+  button:SetScript("OnClick", function()
+    local dd = this:GetParent()
+    if dd.list:IsShown() then
+      dd.list:Hide()
+    else
+      dd.list:Show()
+    end
+  end)
+
+  dropdown.GetSelectedValue = function(dd)
+    local opt = dd.options[dd.selectedIndex or 1]
+    return opt and opt.value
+  end
+
+  if dropdown.options[dropdown.selectedIndex] then
+    button:SetText(dropdown.options[dropdown.selectedIndex].label or "")
+  end
+
+  return dropdown
 end
 
 function RLC_RaidUIFindEventById(rows, eventId)
@@ -43226,26 +43365,202 @@ function RLC_RaidUIFindEventById(rows, eventId)
   return nil
 end
 
-function RLC_RaidUIParseTimestamp(dateText, timeText)
-  local year, month, day = string.match(Trim(dateText or ""), "^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
-  local hour, minute = string.match(Trim(timeText or ""), "^(%d%d?)%:(%d%d)$")
+RLC_RaidUIDaysInMonth = {31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31}
+
+function RLC_RaidUIIsLeapYear(year)
+  return (math.mod(year, 4) == 0 and math.mod(year, 100) ~= 0) or math.mod(year, 400) == 0
+end
+
+function RLC_RaidUIJulianDayNumber(year, month, day)
+  local a = math.floor((14 - month) / 12)
+  local y = year + 4800 - a
+  local m = month + 12 * a - 3
+  return day + math.floor((153 * m + 2) / 5) + 365 * y + math.floor(y / 4) - math.floor(y / 100) + math.floor(y / 400) - 32045
+end
+
+function RLC_RaidUIComputeTimestamp(year, month, day, hour, minute)
+  local ts = time({year = year, month = month, day = day, hour = hour, min = minute, sec = 0})
+  if ts and ts > 0 then
+    return ts
+  end
+
+  -- Fallback: time({...}) can return nil on some Classic clients, so compute
+  -- the target local timestamp from today's local midnight plus the day offset.
+  local now = time()
+  local today = date("*t", now)
+  if not today then
+    return nil
+  end
+  local todayJDN = RLC_RaidUIJulianDayNumber(today.year, today.month, today.day)
+  local targetJDN = RLC_RaidUIJulianDayNumber(year, month, day)
+  local dayDiff = targetJDN - todayJDN
+  local secondsSinceMidnight = (today.hour * 3600) + (today.min * 60) + today.sec
+  local targetSeconds = (hour * 3600) + (minute * 60)
+  local candidate = now - secondsSinceMidnight + (dayDiff * 86400) + targetSeconds
+
+  -- Correct for DST/offset drift by snapping the candidate to the requested local time.
+  for _ = 1, 3 do
+    local actual = date("*t", candidate)
+    if not actual then
+      break
+    end
+    local actualJDN = RLC_RaidUIJulianDayNumber(actual.year, actual.month, actual.day)
+    local drift = (targetJDN - actualJDN) * 86400 + (hour - actual.hour) * 3600 + (minute - actual.min) * 60
+    if drift == 0 then
+      break
+    end
+    candidate = candidate + drift
+  end
+
+  return candidate
+end
+
+function RLC_RaidUIGetClientOffset()
+  local now = time()
+  local lt = date("*t", now)
+  local ut = date("!*t", now)
+  if not lt or not ut then
+    return 0
+  end
+  local dayDiff = lt.yday - ut.yday
+  if dayDiff > 1 then
+    dayDiff = -1
+  elseif dayDiff < -1 then
+    dayDiff = 1
+  end
+  return (dayDiff * 86400) + ((lt.hour - ut.hour) * 3600) + ((lt.min - ut.min) * 60)
+end
+
+function RLC_RaidUIGetServerOffset()
+  local now = time()
+  local client = date("*t", now)
+  local serverHour, serverMinute = GetGameTime()
+  if not client or not serverHour then
+    return RLC_RaidUIGetClientOffset()
+  end
+  local clientSec = (client.hour * 3600) + (client.min * 60) + client.sec
+  local serverSec = (serverHour * 3600) + (serverMinute * 60)
+  local diff = serverSec - clientSec
+  if diff > 43200 then
+    diff = diff - 86400
+  elseif diff < -43200 then
+    diff = diff + 86400
+  end
+  return RLC_RaidUIGetClientOffset() + diff
+end
+
+function RLC_RaidUIParseTimestamp(dateText, timeText, timeZone)
+  local d = tostring(dateText or "")
+  local t = tostring(timeText or "")
+
+  d = Trim(d)
+  t = Trim(t)
+
+  -- Strip all whitespace and stray zero bytes from inside the date/time strings
+  d = string.gsub(d, "%s+", "")
+  t = string.gsub(t, "%s+", "")
+  d = string.gsub(d, "%z", "")
+  t = string.gsub(t, "%z", "")
+
+  -- Try common explicit formats first (YYYY-MM-DD, YYYY/MM/DD, YYYY.MM.DD)
+  local year, month, day = string.match(d, "^(%d%d%d%d)[%-/.](%d%d?)[%-/.](%d%d?)$")
+
+  -- Also accept MM/DD/YYYY or M/D/YYYY
+  if not year then
+    local m, dy
+    m, dy, day = string.match(d, "^(%d%d?)[%-/.](%d%d%d%d)[%-/.](%d%d?)$")
+    if dy then
+      year, month = dy, m
+    end
+  end
+  if not year then
+    local m, dd, dy
+    m, dd, dy = string.match(d, "^(%d%d?)[%-/.](%d%d?)[%-/.](%d%d%d%d)$")
+    if dy then
+      year, month, day = dy, m, dd
+    end
+  end
+
+  -- Fallback: tolerate stray characters and alternate separators
+  if not year then
+    local digits = string.gsub(d, "%D", "")
+    local len = string.len(digits)
+    if len >= 8 then
+      local first = tonumber(string.sub(digits, 1, 4)) or 0
+      local last = tonumber(string.sub(digits, -4, -1)) or 0
+      if first >= 1900 and first <= 2100 then
+        year, month, day = string.sub(digits, 1, 4), string.sub(digits, 5, 6), string.sub(digits, 7, 8)
+      elseif last >= 1900 and last <= 2100 then
+        if len == 8 then
+          year, month, day = string.sub(digits, 5, 8), string.sub(digits, 1, 2), string.sub(digits, 3, 4)
+        elseif len == 7 then
+          year, month, day = string.sub(digits, 4, 7), string.sub(digits, 1, 1), string.sub(digits, 2, 3)
+        end
+      end
+    end
+  end
+
+  -- Accept HH:MM, H:MM, HH.MM, H.MM (24h)
+  local hour, minute = string.match(t, "^(%d%d?)%:?(%d%d)$")
+  if not hour then
+    hour, minute = string.match(t, "^(%d%d?)%.(%d%d)$")
+  end
+  -- Fallback: tolerate spaces or other separators in time
+  if not hour then
+    local tdigits = string.gsub(t, "%D", "")
+    local tlen = string.len(tdigits)
+    if tlen >= 4 then
+      hour, minute = string.sub(tdigits, 1, 2), string.sub(tdigits, 3, 4)
+    elseif tlen >= 3 then
+      hour, minute = string.sub(tdigits, 1, 1), string.sub(tdigits, 2, 3)
+    end
+  end
+
   if not year or not month or not day then
-    return nil, "Use date format YYYY-MM-DD."
+    return nil, "Use date format YYYY-MM-DD. [date='" .. tostring(dateText) .. "']"
   end
   if not hour or not minute then
-    return nil, "Use time format HH:MM."
+    return nil, "Use time format HH:MM. [time='" .. tostring(timeText) .. "']"
   end
-  local timestamp = time({
-    year = tonumber(year),
-    month = tonumber(month),
-    day = tonumber(day),
-    hour = tonumber(hour),
-    min = tonumber(minute),
-    sec = 0,
-  })
-  if not timestamp then
+
+  year = tonumber(year)
+  month = tonumber(month)
+  day = tonumber(day)
+  hour = tonumber(hour)
+  minute = tonumber(minute)
+  if not year or not month or not day or not hour or not minute then
     return nil, "Date or time is invalid."
   end
+  if month < 1 or month > 12 or hour > 23 or minute > 59 or year < 1 then
+    return nil, "Date or time is invalid."
+  end
+
+  local maxDay = RLC_RaidUIDaysInMonth[month]
+  if month == 2 and RLC_RaidUIIsLeapYear(year) then
+    maxDay = 29
+  end
+  if day < 1 or day > maxDay then
+    return nil, "Date or time is invalid."
+  end
+
+  local timestamp = RLC_RaidUIComputeTimestamp(year, month, day, hour, minute)
+  if not timestamp or timestamp <= 0 then
+    return nil, "Date or time is invalid."
+  end
+
+  -- Convert from the selected time zone to an absolute Unix timestamp.
+  -- time() / date() work in the client's local zone, so shift by the
+  -- difference between the client's zone and the zone the user picked.
+  if timeZone and timeZone ~= "" then
+    local selectedOffset = 0
+    if timeZone == "server" then
+      selectedOffset = RLC_RaidUIGetServerOffset()
+    elseif type(timeZone) == "number" then
+      selectedOffset = timeZone
+    end
+    timestamp = timestamp + (RLC_RaidUIGetClientOffset() - selectedOffset)
+  end
+
   return timestamp
 end
 
@@ -44377,17 +44692,20 @@ function BuildRaidSignupPanel(panel)
   panel.createEventBtn.ownerPanel = panel
   panel.createEventBtn:SetScript("OnClick", function()
     local owner = this.ownerPanel
+    if owner.dateInput then owner.dateInput:ClearFocus() end
+    if owner.startTimeInput then owner.startTimeInput:ClearFocus() end
+    if owner.closeTimeInput then owner.closeTimeInput:ClearFocus() end
     local raidKey = owner.createRaidKey
     if not raidKey then
       owner.detailFeedbackText:SetText("|cFFFF6666No raid is selected.|r")
       return
     end
-    local startAt, startErr = RLC_RaidUIParseTimestamp(owner.dateInput:GetText() or "", owner.startTimeInput:GetText() or "")
+    local startAt, startErr = RLC_RaidUIParseTimestamp(RLC_RaidUIGetEditBoxText(owner.dateInput), RLC_RaidUIGetEditBoxText(owner.startTimeInput))
     if not startAt then
       owner.detailFeedbackText:SetText("|cFFFF6666" .. tostring(startErr or "Invalid start time.") .. "|r")
       return
     end
-    local closeAt, closeErr = RLC_RaidUIParseTimestamp(owner.dateInput:GetText() or "", owner.closeTimeInput:GetText() or "")
+    local closeAt, closeErr = RLC_RaidUIParseTimestamp(RLC_RaidUIGetEditBoxText(owner.dateInput), RLC_RaidUIGetEditBoxText(owner.closeTimeInput))
     if not closeAt then
       owner.detailFeedbackText:SetText("|cFFFF6666" .. tostring(closeErr or "Invalid close time.") .. "|r")
       return
@@ -44978,6 +45296,335 @@ function RLC_GuildEventUIBuildResponseText(eventId)
   return table.concat(lines, "\n")
 end
 
+function RLC_GuildEventUIPickerParseDayKey(text)
+  local s = tostring(text or "")
+  s = string.gsub(s, "%z", "")
+  local y, m, d = string.match(s, "^(%d%d%d%d)[%-/.](%d%d?)[%-/.](%d%d?)$")
+  if not y then
+    local dm, dd, dy
+    dm, dd, dy = string.match(s, "^(%d%d?)[%-/.](%d%d?)[%-/.](%d%d%d%d)$")
+    if dy then
+      y, m, d = dy, dm, dd
+    end
+  end
+  if not y then
+    local digits = string.gsub(s, "%D", "")
+    local len = string.len(digits)
+    if len >= 8 then
+      local first = tonumber(string.sub(digits, 1, 4)) or 0
+      local last = tonumber(string.sub(digits, -4, -1)) or 0
+      if first >= 1900 and first <= 2100 then
+        y, m, d = string.sub(digits, 1, 4), string.sub(digits, 5, 6), string.sub(digits, 7, 8)
+      elseif last >= 1900 and last <= 2100 then
+        if len == 8 then
+          y, m, d = string.sub(digits, 5, 8), string.sub(digits, 1, 2), string.sub(digits, 3, 4)
+        elseif len == 7 then
+          y, m, d = string.sub(digits, 4, 7), string.sub(digits, 1, 1), string.sub(digits, 2, 3)
+        end
+      end
+    end
+  end
+  if y and m and d then
+    return string.format("%04d-%02d-%02d", tonumber(y), tonumber(m), tonumber(d))
+  end
+  return nil
+end
+
+function RLC_GuildEventUIPickerParseTime(text)
+  local t = tostring(text or "")
+  t = string.gsub(t, "%z", "")
+  local h, m = string.match(t, "^(%d%d?)%:?(%d%d)$")
+  if not h then
+    h, m = string.match(t, "^(%d%d?)%.(%d%d)$")
+  end
+  if not h then
+    local digits = string.gsub(t, "%D", "")
+    local len = string.len(digits)
+    if len >= 4 then
+      h, m = string.sub(digits, 1, 2), string.sub(digits, 3, 4)
+    elseif len >= 3 then
+      h, m = string.sub(digits, 1, 1), string.sub(digits, 2, 3)
+    end
+  end
+  if h and m then
+    return tonumber(h), tonumber(m)
+  end
+  return 20, 0
+end
+
+function RLC_GuildEventUIPickerMonthStart(year, month)
+  return RLC_RaidUIComputeTimestamp(year, month, 1, 12, 0)
+end
+
+function RLC_GuildEventUIUpdateDatePicker(picker)
+  if not picker or not picker:IsShown() then return end
+  local year = tonumber(picker.viewYear) or date("*t").year
+  local month = tonumber(picker.viewMonth) or date("*t").month
+  local monthStartTS = RLC_GuildEventUIPickerMonthStart(year, month)
+  if not monthStartTS then
+    local today = date("*t")
+    year, month = today.year, today.month
+    picker.viewYear = year
+    picker.viewMonth = month
+    monthStartTS = RLC_GuildEventUIPickerMonthStart(year, month)
+  end
+  picker.monthTitleText:SetText(date("%B %Y", monthStartTS))
+
+  local firstInfo = date("*t", monthStartTS)
+  local startOffset = (tonumber(firstInfo.wday) or 1) - 1
+  local calendarStartTS = monthStartTS - (startOffset * SECONDS_PER_DAY)
+  local todayKey = DayKey()
+  local selKey = picker.selectedDayKey or ""
+
+  for i = 1, 42 do
+    local cell = picker.dayCells[i]
+    local dayTS = calendarStartTS + ((i - 1) * SECONDS_PER_DAY)
+    local dayInfo = date("*t", dayTS)
+    local dayKey = DayKeyFromTS(dayTS)
+    local isCurrentMonth = dayInfo.month == month and dayInfo.year == year
+    local isToday = dayKey == todayKey
+    local isSelected = dayKey == selKey
+    cell.dayKey = dayKey
+    cell:SetScript("OnClick", function()
+      this.picker.selectedDayKey = this.dayKey
+      RLC_GuildEventUIUpdateDatePicker(this.picker)
+    end)
+    cell.dayText:SetText((isCurrentMonth and "|cFFFFFFFF" or "|cFF777777") .. tostring(dayInfo.day) .. "|r")
+    if isSelected then
+      cell:SetBackdropColor(0.14, 0.14, 0.08, 0.96)
+      cell:SetBackdropBorderColor(1.00, 0.84, 0.18, 0.96)
+    elseif isToday then
+      cell:SetBackdropColor(0.06, 0.09, 0.12, 0.94)
+      cell:SetBackdropBorderColor(0.46, 0.76, 1.00, 0.90)
+    elseif isCurrentMonth then
+      cell:SetBackdropColor(0.05, 0.05, 0.07, 0.92)
+      cell:SetBackdropBorderColor(0.22, 0.22, 0.28, 0.80)
+    else
+      cell:SetBackdropColor(0.03, 0.03, 0.05, 0.88)
+      cell:SetBackdropBorderColor(0.14, 0.14, 0.18, 0.70)
+    end
+    cell:Show()
+  end
+end
+
+function RLC_GuildEventUIApplyDatePickerSelection(picker)
+  if not picker or not picker.ownerPanel then return end
+  local panel = picker.ownerPanel
+  local dayKey = picker.selectedDayKey or RLC_GuildEventUIPickerParseDayKey(RLC_RaidUIGetEditBoxText(panel.dateInput))
+  if not dayKey then
+    local today = date("*t", time())
+    dayKey = string.format("%04d-%02d-%02d", today.year, today.month, today.day)
+  end
+  local hour = picker.selectedHour or 20
+  local minute = picker.selectedMinute or 0
+  panel.dateInput:SetText(dayKey)
+  panel.startInput:SetText(string.format("%02d:%02d", hour, minute))
+  picker:Hide()
+end
+
+function RLC_GuildEventUIBuildDatePicker(panel)
+  if panel.datePicker then return panel.datePicker end
+  local picker = CreateFrame("Frame", "RLC_GuildEventDatePicker", panel)
+  picker:SetWidth(360)
+  picker:SetHeight(380)
+  picker:SetFrameStrata("DIALOG")
+  picker:SetToplevel(true)
+  picker:SetBackdrop({
+    bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+    edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+    tile = false, tileSize = 8, edgeSize = 12,
+    insets = { left = 3, right = 3, top = 3, bottom = 3 }
+  })
+  picker:SetBackdropColor(0.05, 0.05, 0.07, 0.96)
+  picker:SetBackdropBorderColor(0.45, 0.45, 0.55, 0.95)
+  picker:EnableMouse(true)
+  picker:Hide()
+  picker.ownerPanel = panel
+
+  picker.monthPrevBtn = CreateFrame("Button", nil, picker, "UIPanelButtonTemplate")
+  picker.monthPrevBtn:SetWidth(24)
+  picker.monthPrevBtn:SetHeight(20)
+  picker.monthPrevBtn:SetPoint("TOPLEFT", picker, "TOPLEFT", 12, -10)
+  picker.monthPrevBtn:SetText("<")
+  picker.monthPrevBtn.ownerPanel = panel
+  picker.monthPrevBtn:SetScript("OnClick", function()
+    local p = this:GetParent()
+    p.viewMonth = (tonumber(p.viewMonth) or 1) - 1
+    while p.viewMonth < 1 do
+      p.viewMonth = 12
+      p.viewYear = (tonumber(p.viewYear) or 2000) - 1
+    end
+    RLC_GuildEventUIUpdateDatePicker(p)
+  end)
+
+  picker.monthTitleText = picker:CreateFontString(nil, "OVERLAY", "GameFontNormal")
+  picker.monthTitleText:SetPoint("LEFT", picker.monthPrevBtn, "RIGHT", 8, 0)
+  picker.monthTitleText:SetWidth(180)
+  picker.monthTitleText:SetJustifyH("CENTER")
+
+  picker.monthNextBtn = CreateFrame("Button", nil, picker, "UIPanelButtonTemplate")
+  picker.monthNextBtn:SetWidth(24)
+  picker.monthNextBtn:SetHeight(20)
+  picker.monthNextBtn:SetPoint("LEFT", picker.monthTitleText, "RIGHT", 8, 0)
+  picker.monthNextBtn:SetText(">")
+  picker.monthNextBtn.ownerPanel = panel
+  picker.monthNextBtn:SetScript("OnClick", function()
+    local p = this:GetParent()
+    p.viewMonth = (tonumber(p.viewMonth) or 1) + 1
+    while p.viewMonth > 12 do
+      p.viewMonth = 1
+      p.viewYear = (tonumber(p.viewYear) or 2000) + 1
+    end
+    RLC_GuildEventUIUpdateDatePicker(p)
+  end)
+
+  picker.closeBtn = CreateFrame("Button", nil, picker, "UIPanelButtonTemplate")
+  picker.closeBtn:SetWidth(50)
+  picker.closeBtn:SetHeight(20)
+  picker.closeBtn:SetPoint("TOPRIGHT", picker, "TOPRIGHT", -10, -10)
+  picker.closeBtn:SetText("X")
+  picker.closeBtn:SetScript("OnClick", function() this:GetParent():Hide() end)
+
+  local dayLabels = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}
+  picker.dayHeaders = {}
+  local lastHeader = nil
+  for i = 1, 7 do
+    local header = picker:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    if lastHeader then
+      header:SetPoint("LEFT", lastHeader, "RIGHT", 2, 0)
+    else
+      header:SetPoint("TOPLEFT", picker.monthPrevBtn, "BOTTOMLEFT", 0, -10)
+    end
+    header:SetWidth(46)
+    header:SetJustifyH("CENTER")
+    header:SetText(dayLabels[i])
+    picker.dayHeaders[i] = header
+    lastHeader = header
+  end
+
+  picker.calendarFrame = CreateFrame("Frame", nil, picker)
+  picker.calendarFrame:SetPoint("TOPLEFT", picker.dayHeaders[1], "BOTTOMLEFT", 0, -6)
+  picker.calendarFrame:SetWidth(334)
+  picker.calendarFrame:SetHeight(202)
+
+  picker.dayCells = {}
+  local lastCell = nil
+  for i = 1, 42 do
+    local cell = CreateFrame("Button", nil, picker.calendarFrame)
+    cell:SetWidth(46)
+    cell:SetHeight(32)
+    cell:SetBackdrop({
+      bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
+      edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
+      tile = false, tileSize = 8, edgeSize = 8,
+      insets = { left = 1, right = 1, top = 1, bottom = 1 }
+    })
+    cell:SetBackdropColor(0.05, 0.05, 0.07, 0.92)
+    cell:SetBackdropBorderColor(0.22, 0.22, 0.28, 0.80)
+    if i == 1 then
+      cell:SetPoint("TOPLEFT", picker.calendarFrame, "TOPLEFT", 0, 0)
+    elseif PositiveModulo(i - 1, 7) == 0 then
+      cell:SetPoint("TOPLEFT", picker.dayCells[i - 7], "BOTTOMLEFT", 0, -2)
+    else
+      cell:SetPoint("LEFT", picker.dayCells[i - 1], "RIGHT", 2, 0)
+    end
+    cell.picker = picker
+    cell.dayText = cell:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    cell.dayText:SetPoint("CENTER", cell, "CENTER", 0, 0)
+    picker.dayCells[i] = cell
+    lastCell = cell
+  end
+
+  picker.timeLabel = picker:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  picker.timeLabel:SetPoint("TOPLEFT", picker.calendarFrame, "BOTTOMLEFT", 0, -10)
+  picker.timeLabel:SetText("|cFFFFD700Time|r")
+
+  local timeOptions = {"12:00", "14:00", "16:00", "18:00", "20:00", "22:00"}
+  picker.timeButtons = {}
+  local lastTimeBtn = nil
+  for i, timeText in ipairs(timeOptions) do
+    local btn = CreateFrame("Button", nil, picker, "UIPanelButtonTemplate")
+    btn:SetWidth(52)
+    btn:SetHeight(22)
+    if lastTimeBtn then
+      btn:SetPoint("LEFT", lastTimeBtn, "RIGHT", 4, 0)
+    else
+      btn:SetPoint("TOPLEFT", picker.timeLabel, "BOTTOMLEFT", 0, -8)
+    end
+    btn:SetText(timeText)
+    btn.timeText = timeText
+    btn:SetScript("OnClick", function()
+      local p = this:GetParent()
+      local h, m = RLC_GuildEventUIPickerParseTime(this.timeText)
+      p.selectedHour = h
+      p.selectedMinute = m
+      if p.timeInput then p.timeInput:SetText(this.timeText) end
+    end)
+    picker.timeButtons[i] = btn
+    lastTimeBtn = btn
+  end
+
+  picker.timeInputLabel = picker:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  picker.timeInputLabel:SetPoint("TOPLEFT", picker.timeButtons[1], "BOTTOMLEFT", 0, -8)
+  picker.timeInputLabel:SetText("|cFFAAAAAAor type:|r")
+
+  picker.timeInputBG, picker.timeInput = RLC_RaidUICreateEditBox(picker, 64, 22)
+  picker.timeInputBG:SetPoint("LEFT", picker.timeInputLabel, "RIGHT", 6, 0)
+  picker.timeInput:SetMaxLetters(5)
+  picker.timeInput:SetAutoFocus(false)
+  picker.timeInput:SetScript("OnEscapePressed", function() this:ClearFocus() end)
+  picker.timeInput:SetScript("OnEnterPressed", function()
+    this:ClearFocus()
+    local p = this:GetParent():GetParent()
+    if p and p.doneBtn then p.doneBtn:Click() end
+  end)
+
+  picker.doneBtn = CreateFrame("Button", nil, picker, "UIPanelButtonTemplate")
+  picker.doneBtn:SetWidth(70)
+  picker.doneBtn:SetHeight(22)
+  picker.doneBtn:SetPoint("BOTTOMRIGHT", picker, "BOTTOMRIGHT", -10, 10)
+  picker.doneBtn:SetText("Done")
+  picker.doneBtn:SetScript("OnClick", function()
+    local p = this:GetParent()
+    if not p.selectedDayKey then
+      local today = date("*t", time())
+      p.selectedDayKey = string.format("%04d-%02d-%02d", today.year, today.month, today.day)
+    end
+    local timeText = p.timeInput and p.timeInput:GetText() or ""
+    if timeText and timeText ~= "" then
+      p.selectedHour, p.selectedMinute = RLC_GuildEventUIPickerParseTime(timeText)
+    end
+    if not p.selectedHour then
+      p.selectedHour, p.selectedMinute = RLC_GuildEventUIPickerParseTime(RLC_RaidUIGetEditBoxText(p.ownerPanel.startInput))
+    end
+    RLC_GuildEventUIApplyDatePickerSelection(p)
+  end)
+
+  return picker
+end
+
+function RLC_GuildEventUIShowDatePicker(panel)
+  if not panel then return end
+  local picker = RLC_GuildEventUIBuildDatePicker(panel)
+  if not picker then return end
+  picker:SetPoint("TOPLEFT", panel.dateBG, "BOTTOMLEFT", 0, -4)
+  local dayKey = RLC_GuildEventUIPickerParseDayKey(RLC_RaidUIGetEditBoxText(panel.dateInput))
+  if not dayKey then
+    local today = date("*t", time())
+    dayKey = string.format("%04d-%02d-%02d", today.year, today.month, today.day)
+  end
+  local y, m, d = string.match(dayKey, "(%d%d%d%d)%-(%d%d)%-(%d%d)")
+  picker.viewYear = tonumber(y)
+  picker.viewMonth = tonumber(m)
+  picker.selectedDayKey = dayKey
+  picker.selectedHour, picker.selectedMinute = RLC_GuildEventUIPickerParseTime(RLC_RaidUIGetEditBoxText(panel.startInput))
+  if picker.timeInput then
+    picker.timeInput:SetText(string.format("%02d:%02d", picker.selectedHour or 20, picker.selectedMinute or 0))
+  end
+  RLC_GuildEventUIUpdateDatePicker(picker)
+  picker:Show()
+end
+
 function RLC_GuildEventUICycleMonth(panel, direction)
   local today = date("*t")
   local year = tonumber(panel and panel.viewYear) or today.year
@@ -45069,7 +45716,6 @@ function BuildGuildEventsPanel(panel)
   panel.listPane = RLC_RaidUICreateInset(panel)
   panel.listPane:SetPoint("TOPLEFT", panel.summaryText, "BOTTOMLEFT", 0, -8)
   panel.listPane:SetPoint("BOTTOMLEFT", panel, "BOTTOMLEFT", 12, 12)
-  panel.listPane:SetWidth(276)
 
   panel.detailPane = RLC_RaidUICreateInset(panel)
   panel.detailPane:SetPoint("TOPLEFT", panel.listPane, "TOPRIGHT", 10, 0)
@@ -45083,7 +45729,7 @@ function BuildGuildEventsPanel(panel)
   panel.listHint:SetPoint("TOPLEFT", panel.listTitle, "BOTTOMLEFT", 0, -5)
   panel.listHint:SetPoint("RIGHT", panel.listPane, "RIGHT", -10, 0)
   panel.listHint:SetJustifyH("LEFT")
-  panel.listHint:SetText("|cFFAAAAAAClick a day to view guild events on the calendar.|r")
+  panel.listHint:SetText("|cFFAAAAAAClick a day or event below to view details. Use the calendar button next to Date when creating events.|r")
 
   panel.monthPrevBtn = CreateFrame("Button", nil, panel.listPane, "UIPanelButtonTemplate")
   panel.monthPrevBtn:SetWidth(24)
@@ -45111,6 +45757,7 @@ function BuildGuildEventsPanel(panel)
     RLC_GuildEventUICycleMonth(this.ownerPanel, 1)
     RLC.UI:RefreshGuildEventsPanel(true)
   end)
+
 
   panel.calendarDayHeaders = {}
   local dayLabels = {"Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"}
@@ -45165,9 +45812,15 @@ function BuildGuildEventsPanel(panel)
     cell.metaText:SetJustifyH("LEFT")
     cell.metaText:SetJustifyV("TOP")
     cell:SetScript("OnClick", function()
-      this.ownerPanel.selectedDayKey = this.dayKey
-      this.ownerPanel.selectedEventId = this.primaryEventId
-      this.ownerPanel.lastDetailEventId = nil
+      local panel = this.ownerPanel
+      if (this.dayEventsCount or 0) == 0 and (RLC and RLC.IsRaidOrganizerRank and RLC:IsRaidOrganizerRank()) then
+        panel.mode = "admin"
+        if panel.dateInput then panel.dateInput:SetText(this.dayKey or "") end
+        if panel.startInput then panel.startInput:SetText("20:00") end
+      end
+      panel.selectedDayKey = this.dayKey
+      panel.selectedEventId = this.primaryEventId
+      panel.lastDetailEventId = nil
       RLC.UI:RefreshGuildEventsPanel(true)
     end)
     panel.calendarCells[i] = cell
@@ -45175,7 +45828,7 @@ function BuildGuildEventsPanel(panel)
   end
 
   panel.eventListFrame = CreateFrame("Frame", nil, panel.listPane)
-  panel.eventListFrame:SetPoint("TOPLEFT", panel.listHint, "BOTTOMLEFT", 0, -8)
+  panel.eventListFrame:SetPoint("TOPLEFT", panel.calendarFrame, "BOTTOMLEFT", 0, -10)
   panel.eventListFrame:SetPoint("BOTTOMRIGHT", panel.listPane, "BOTTOMRIGHT", -10, 10)
   panel.eventListFrame:EnableMouse(true)
   panel.eventListFrame:EnableMouseWheel(true)
@@ -45246,16 +45899,16 @@ function BuildGuildEventsPanel(panel)
   panel.detailMeta:SetJustifyH("LEFT")
   panel.detailMeta:SetJustifyV("TOP")
 
+  panel.dayEventsTitle = panel.detailPane:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  panel.dayEventsTitle:SetPoint("TOPLEFT", panel.detailPane, "TOPLEFT", 10, -250)
+  panel.dayEventsTitle:SetText("|cFFFFD700Selected Day|r")
+
   panel.detailBody = panel.detailPane:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
   panel.detailBody:SetPoint("TOPLEFT", panel.detailMeta, "BOTTOMLEFT", 0, -8)
   panel.detailBody:SetPoint("RIGHT", panel.detailPane, "RIGHT", -10, 0)
-  panel.detailBody:SetHeight(182)
+  panel.detailBody:SetPoint("BOTTOM", panel.dayEventsTitle, "TOP", 0, 8)
   panel.detailBody:SetJustifyH("LEFT")
   panel.detailBody:SetJustifyV("TOP")
-
-  panel.dayEventsTitle = panel.detailPane:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  panel.dayEventsTitle:SetPoint("TOPLEFT", panel.detailBody, "BOTTOMLEFT", 0, -8)
-  panel.dayEventsTitle:SetText("|cFFFFD700Selected Day|r")
 
   panel.dayEventsFrame = CreateFrame("Frame", nil, panel.detailPane)
   panel.dayEventsFrame:SetPoint("TOPLEFT", panel.dayEventsTitle, "BOTTOMLEFT", 0, -4)
@@ -45401,7 +46054,7 @@ function BuildGuildEventsPanel(panel)
   panel.saveSignupBtn:SetWidth(94)
   panel.saveSignupBtn:SetHeight(22)
   panel.saveSignupBtn:SetPoint("LEFT", panel.withdrawBtn, "RIGHT", 8, 0)
-  panel.saveSignupBtn:SetText("Save RSVP")
+  panel.saveSignupBtn:SetText("Sign Up")
   panel.saveSignupBtn.ownerPanel = panel
   panel.saveSignupBtn:SetScript("OnClick", function()
     local owner = this.ownerPanel
@@ -45456,18 +46109,26 @@ function BuildGuildEventsPanel(panel)
   panel.dateLabel:SetText("Date")
   panel.dateBG, panel.dateInput = RLC_RaidUICreateEditBox(panel.detailPane, 98, 22)
   panel.dateBG:SetPoint("TOPLEFT", panel.dateLabel, "BOTTOMLEFT", 0, -4)
+  panel.dateInput.ownerPanel = panel
+  panel.dateInput:SetScript("OnMouseDown", function()
+    RLC_GuildEventUIShowDatePicker(this.ownerPanel)
+  end)
+
+  panel.datePickerBtn = CreateFrame("Button", nil, panel.detailPane, "UIPanelButtonTemplate")
+  panel.datePickerBtn:SetWidth(24)
+  panel.datePickerBtn:SetHeight(22)
+  panel.datePickerBtn:SetPoint("LEFT", panel.dateBG, "RIGHT", 4, 0)
+  panel.datePickerBtn:SetText(">")
+  panel.datePickerBtn.ownerPanel = panel
+  panel.datePickerBtn:SetScript("OnClick", function()
+    RLC_GuildEventUIShowDatePicker(this.ownerPanel)
+  end)
 
   panel.startLabel = panel.detailPane:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   panel.startLabel:SetPoint("LEFT", panel.dateBG, "RIGHT", 12, 18)
   panel.startLabel:SetText("Start")
-  panel.startBG, panel.startInput = RLC_RaidUICreateEditBox(panel.detailPane, 54, 22)
+  panel.startBG, panel.startInput = RLC_RaidUICreateEditBox(panel.detailPane, 80, 22)
   panel.startBG:SetPoint("TOPLEFT", panel.startLabel, "BOTTOMLEFT", 0, -4)
-
-  panel.closeLabel = panel.detailPane:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
-  panel.closeLabel:SetPoint("LEFT", panel.startBG, "RIGHT", 12, 18)
-  panel.closeLabel:SetText("Close")
-  panel.closeBG, panel.closeInput = RLC_RaidUICreateEditBox(panel.detailPane, 54, 22)
-  panel.closeBG:SetPoint("TOPLEFT", panel.closeLabel, "BOTTOMLEFT", 0, -4)
 
   panel.notesLabel = panel.detailPane:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
   panel.notesLabel:SetPoint("TOPLEFT", panel.dateBG, "BOTTOMLEFT", 0, -10)
@@ -45491,18 +46152,18 @@ function BuildGuildEventsPanel(panel)
   panel.createEventBtn.ownerPanel = panel
   panel.createEventBtn:SetScript("OnClick", function()
     local owner = this.ownerPanel
-    local startAt, startErr = RLC_RaidUIParseTimestamp(owner.dateInput:GetText() or "", owner.startInput:GetText() or "")
+    if owner.titleInput then owner.titleInput:ClearFocus() end
+    if owner.dateInput then owner.dateInput:ClearFocus() end
+    if owner.startInput then owner.startInput:ClearFocus() end
+    if owner.notesInput then owner.notesInput:ClearFocus() end
+    if owner.rewardsInput then owner.rewardsInput:ClearFocus() end
+    local startAt, startErr = RLC_RaidUIParseTimestamp(RLC_RaidUIGetEditBoxText(owner.dateInput), RLC_RaidUIGetEditBoxText(owner.startInput), "server")
     if not startAt then
       owner.detailFeedbackText:SetText("|cFFFF6666" .. tostring(startErr or "Invalid start time.") .. "|r")
       return
     end
-    local closeAt, closeErr = RLC_RaidUIParseTimestamp(owner.dateInput:GetText() or "", owner.closeInput:GetText() or "")
-    if not closeAt then
-      owner.detailFeedbackText:SetText("|cFFFF6666" .. tostring(closeErr or "Invalid close time.") .. "|r")
-      return
-    end
-    if closeAt > startAt then closeAt = startAt end
-    local stored, err = RLC:CreateGuildEvent(owner.titleInput:GetText() or "", owner.createCategory or RLC_GuildEventCategoryOrder[1], startAt, closeAt, owner.notesInput:GetText() or "", owner.rewardsInput:GetText() or "")
+    local closeAt = startAt - 1800
+    local stored, err = RLC:CreateGuildEvent(RLC_RaidUIGetEditBoxText(owner.titleInput), owner.createCategory or RLC_GuildEventCategoryOrder[1], startAt, closeAt, RLC_RaidUIGetEditBoxText(owner.notesInput), RLC_RaidUIGetEditBoxText(owner.rewardsInput))
     if not stored then
       owner.detailFeedbackText:SetText("|cFFFF6666" .. tostring(err or "Unable to create guild event.") .. "|r")
       return
@@ -45517,11 +46178,11 @@ function BuildGuildEventsPanel(panel)
   local tomorrow = date("*t", time() + 86400)
   panel.dateInput:SetText(string.format("%04d-%02d-%02d", tomorrow.year, tomorrow.month, tomorrow.day))
   panel.startInput:SetText("20:00")
-  panel.closeInput:SetText("19:30")
   panel.titleInput:SetText("")
   panel.notesInput:SetText("")
   panel.rewardsInput:SetText("")
   RLC_GuildEventUICycleCategory(panel, 0)
+  panel.datePicker = RLC_GuildEventUIBuildDatePicker(panel)
 end
 
 function RLC.UI:RefreshGuildEventsPanel(skipRequest)
@@ -45539,10 +46200,13 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
   if panel.mode == "admin" then
     local canCreate = RLC:IsRaidOrganizerRank()
     panel.listPane:Hide()
+    panel.detailPane:ClearAllPoints()
+    panel.detailPane:SetPoint("TOPLEFT", panel.summaryText, "BOTTOMLEFT", 0, -8)
+    panel.detailPane:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 12)
     panel.detailPane:Show()
-    panel.summaryText:SetText("|cFF88CCFFGuild Events|r lets any guild member post meetings, dungeon groups, social events, and more.")
+    panel.summaryText:SetText("|cFF88CCFFGuild Events|r lets Flamebound and higher post meetings, dungeon groups, social events, and more.")
     panel.detailTitle:SetText("|cFFFFD700Create Guild Event|r")
-    panel.detailMeta:SetText(canCreate and "|cFF88FF88Every guild member can post guild events here.|r" or "|cFF88FF88Every guild member can post guild events here.|r")
+    panel.detailMeta:SetText(canCreate and "|cFF88FF88Flamebound and higher can post guild events here.|r" or "|cFFFF6666Only Flamebound and higher can post guild events. Everyone else can still RSVP.|r")
     panel.detailBody:SetText("|cFFAAAAAAPost a guild event with a title, category, schedule, and short note. Everyone using the addon can see it, RSVP, and track the start countdown.|r")
     panel.managerOpenBtn:Hide()
     panel.managerLockBtn:Hide()
@@ -45568,8 +46232,6 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
     panel.dateBG:Show()
     panel.startLabel:Show()
     panel.startBG:Show()
-    panel.closeLabel:Show()
-    panel.closeBG:Show()
     panel.notesLabel:Show()
     panel.notesBG:Show()
     panel.rewardsLabel:Show()
@@ -45581,13 +46243,15 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
     if panel.titleInput then panel.titleInput:EnableKeyboard(canCreate) end
     if panel.dateInput then panel.dateInput:EnableKeyboard(canCreate) end
     if panel.startInput then panel.startInput:EnableKeyboard(canCreate) end
-    if panel.closeInput then panel.closeInput:EnableKeyboard(canCreate) end
     if panel.notesInput then panel.notesInput:EnableKeyboard(canCreate) end
     if panel.rewardsInput then panel.rewardsInput:EnableKeyboard(canCreate) end
     return
   end
 
   panel.listPane:Show()
+  panel.detailPane:ClearAllPoints()
+  panel.detailPane:SetPoint("TOPLEFT", panel.listPane, "TOPRIGHT", 10, 0)
+  panel.detailPane:SetPoint("BOTTOMRIGHT", panel, "BOTTOMRIGHT", -12, 12)
   panel.detailPane:Show()
   panel.monthPrevBtn:Show()
   panel.monthTitleText:Show()
@@ -45613,8 +46277,6 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
   panel.dateBG:Hide()
   panel.startLabel:Hide()
   panel.startBG:Hide()
-  panel.closeLabel:Hide()
-  panel.closeBG:Hide()
   panel.notesLabel:Hide()
   panel.notesBG:Hide()
   panel.rewardsLabel:Hide()
@@ -45625,22 +46287,54 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
   panel.visibleEvents = eventRows
   panel.summaryText:SetText(panel.mode == "mine" and ("|cFF88CCFFMy Guild Events|r  " .. tostring(table.getn(eventRows)) .. " events with your RSVP saved.") or ("|cFF88CCFFGuild Events|r  " .. tostring(table.getn(eventRows)) .. " events cached across the guild."))
   panel.listTitle:SetText(panel.mode == "mine" and "|cFFFFD700My RSVP Calendar|r" or "|cFFFFD700Guild Event Calendar|r")
+
+  -- Scale the calendar to fill most of the tab width.
+  local panelWidth = panel:GetWidth() or 800
+  local listPaneWidth = math.max(480, math.min(panelWidth - 300, 800))
+  local calendarFrameWidth = listPaneWidth - 20
+  local cellSpacing = 2
+  local cellWidth = math.floor((calendarFrameWidth - (6 * cellSpacing)) / 7)
+  local cellHeight = 68
+  calendarFrameWidth = (cellWidth * 7) + (6 * cellSpacing)
+  local calendarFrameHeight = (cellHeight * 6) + (5 * cellSpacing)
+
+  panel.listPane:SetWidth(listPaneWidth)
+  panel.calendarFrame:SetWidth(calendarFrameWidth)
+  panel.calendarFrame:SetHeight(calendarFrameHeight)
+  panel.calendarFrame:ClearAllPoints()
+  panel.monthTitleText:SetWidth(listPaneWidth - 92)
+
+  for i = 1, table.getn(panel.calendarDayHeaders or {}) do
+    local header = panel.calendarDayHeaders[i]
+    header:ClearAllPoints()
+    header:SetWidth(cellWidth)
+    if i == 1 then
+      header:SetPoint("TOPLEFT", panel.monthPrevBtn, "BOTTOMLEFT", 0, -10)
+    else
+      header:SetPoint("LEFT", panel.calendarDayHeaders[i - 1], "RIGHT", cellSpacing, 0)
+    end
+  end
+  panel.calendarFrame:SetPoint("TOPLEFT", panel.calendarDayHeaders[1], "BOTTOMLEFT", 0, -6)
+
+  for i = 1, table.getn(panel.calendarCells or {}) do
+    panel.calendarCells[i]:SetWidth(cellWidth)
+    panel.calendarCells[i]:SetHeight(cellHeight)
+  end
+
+  -- Hide the legacy event list; events are now shown inside calendar cells.
   panel.eventListFrame:Hide()
   panel.noEventsText:Hide()
-  for i = 1, table.getn(panel.eventRows or {}) do
-    panel.eventRows[i]:Hide()
-  end
 
   local today = date("*t")
   if not panel.viewYear or not panel.viewMonth then
     panel.viewYear = today.year
     panel.viewMonth = today.month
   end
-  local monthStartTS = time({year = tonumber(panel.viewYear), month = tonumber(panel.viewMonth), day = 1, hour = 12, min = 0, sec = 0})
+  local monthStartTS = RLC_RaidUIComputeTimestamp(tonumber(panel.viewYear), tonumber(panel.viewMonth), 1, 12, 0)
   if not monthStartTS then
     panel.viewYear = today.year
     panel.viewMonth = today.month
-    monthStartTS = time({year = today.year, month = today.month, day = 1, hour = 12, min = 0, sec = 0})
+    monthStartTS = RLC_RaidUIComputeTimestamp(today.year, today.month, 1, 12, 0)
   end
   panel.monthTitleText:SetText(date("%B %Y", monthStartTS))
 
@@ -45700,15 +46394,24 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
     local hasEvents = table.getn(dayEvents) > 0
     cell.dayKey = dayKey
     cell.primaryEventId = hasEvents and dayEvents[1].id or nil
+    cell.dayEventsCount = table.getn(dayEvents)
     cell.dayText:SetText((isCurrentMonth and "|cFFFFFFFF" or "|cFF777777") .. tostring(dayInfo.day) .. "|r")
     if hasEvents then
-      local countText = tostring(table.getn(dayEvents)) .. " evt"
-      if table.getn(dayEvents) == 1 then
-        countText = RLC_RaidUIColorText(date("%H:%M", tonumber(dayEvents[1].startAt) or 0), 0.52, 1.00, 0.62)
-      else
-        countText = RLC_RaidUIColorText(countText, 0.52, 1.00, 0.62)
+      local lines = {}
+      for idx = 1, math.min(3, table.getn(dayEvents)) do
+        local ev = dayEvents[idx]
+        local title = tostring(ev.title or "Event")
+        if string.len(title) > 10 then
+          title = string.sub(title, 1, 10) .. ".."
+        end
+        local color = RLC_GuildEventCategoryColor[NormalizeGuildEventCategory(ev.category)] or "88CCFF"
+        table.insert(lines, "|cFF" .. color .. title .. "|r")
       end
-      cell.metaText:SetText(countText)
+      if table.getn(dayEvents) > 3 then
+        table.insert(lines, "|cFFAAAAAA+" .. tostring(table.getn(dayEvents) - 3) .. " more|r")
+      end
+      cell.metaText:SetText(table.concat(lines, "\n"))
+      cell.metaText:SetWidth(cellWidth - 6)
     else
       cell.metaText:SetText("")
     end
@@ -45747,7 +46450,17 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
     end
   end
 
-  panel.dayEventsTitle:SetText("|cFFFFD700Selected Day|r  " .. tostring(panel.selectedDayKey or ""))
+  local selectedDayText = tostring(panel.selectedDayKey or "")
+  if panel.selectedDayKey then
+    local sy, sm, sd = string.match(panel.selectedDayKey, "^(%d%d%d%d)%-(%d%d)%-(%d%d)$")
+    if sy then
+      local sTS = RLC_RaidUIComputeTimestamp(tonumber(sy), tonumber(sm), tonumber(sd), 12, 0)
+      if sTS then
+        selectedDayText = date("%A, %b %d", sTS)
+      end
+    end
+  end
+  panel.dayEventsTitle:SetText("|cFFFFD700Selected Day|r  |cFFFFFFFF" .. selectedDayText .. "|r")
   panel.dayEventsEmptyText:SetText(table.getn(selectedDayEvents) == 0 and "|cFF888888No events on this day.|r" or "")
   for i = 1, table.getn(panel.dayEventRows or {}) do
     local row = panel.dayEventRows[i]
@@ -45758,7 +46471,10 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
       local borderR, borderG, borderB = RLC_RaidUIGetStatusColor(eventRecord.status)
       row.eventRecord = eventRecord
       row.titleText:SetText("|cFFFFD700" .. tostring(eventRecord.title or "Guild Event") .. "|r")
-      row.metaText:SetText(RLC_RaidUIColorText(date("%H:%M", tonumber(eventRecord.startAt) or 0), 0.88, 0.88, 0.90) .. "  |cFF88FF88" .. tostring(counts.going or 0) .. "|r")
+      local categoryText = "|cFF88CCFF" .. tostring(eventRecord.category or "Event") .. "|r"
+      local timeText = RLC_RaidUIColorText(date("%H:%M", tonumber(eventRecord.startAt) or 0), 0.88, 0.88, 0.90)
+      local goingText = "|cFF88FF88" .. tostring(counts.going or 0) .. " going|r"
+      row.metaText:SetText(categoryText .. "  " .. timeText .. "  " .. goingText)
       row:SetBackdropBorderColor(isSelected and 1 or borderR, isSelected and 0.84 or borderG, isSelected and 0.18 or borderB, isSelected and 0.98 or 0.82)
       row:SetBackdropColor(isSelected and 0.12 or 0.06, isSelected and 0.10 or 0.06, isSelected and 0.06 or 0.08, 0.92)
       row:Show()

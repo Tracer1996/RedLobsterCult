@@ -706,6 +706,82 @@ function DKP:SendSyncTo(requester)
   self:QueueMessage(JoinWire({"DKPEND", target, me}))
 end
 
+function DKP:BroadcastSnapshot()
+  if not self:CanAnswerSync() then return end
+  local db = self:EnsureDB()
+  local me = SafeText(ShortName(UnitName("player")) or "Unknown", 20)
+  self:QueueMessage(JoinWire({"DKPSNAPBEGIN", me}))
+
+  local states = {}
+  for _, record in pairs(db.balances) do
+    if self:IsCurrentGuildMember(record.name) then
+      table.insert(states, record)
+    end
+  end
+  table.sort(states, function(a, b) return Lower(a.name) < Lower(b.name) end)
+
+  for i = 1, table.getn(states) do
+    local record = states[i]
+    self:QueueMessage(JoinWire({
+      "DKPSNAP",
+      SafeText(record.name, 20),
+      tostring(record.balance or 0),
+      tostring(record.updatedAt or 0),
+      SafeText(record.updatedBy, 20),
+      SafeText(record.transactionId, 40),
+    }))
+  end
+
+  local firstHistory = math.max(1, table.getn(db.transactions) - self.SYNC_HISTORY_LIMIT + 1)
+  for index = firstHistory, table.getn(db.transactions) do
+    local transaction = db.transactions[index]
+    if self:IsCurrentGuildMember(transaction.name) then
+      self:QueueMessage(JoinWire({
+        "DKPSNAPLOG",
+        SafeText(transaction.id, 40),
+        transaction.operation == "SET" and "SET" or "ADD",
+        SafeText(transaction.name, 20),
+        tostring(transaction.amount or 0),
+        tostring(transaction.before or 0),
+        tostring(transaction.after or 0),
+        tostring(transaction.timestamp or 0),
+        SafeText(transaction.actor, 20),
+        SafeText(transaction.reason, 60),
+      }))
+    end
+  end
+  self:QueueMessage(JoinWire({"DKPSNAPEND", me}))
+end
+
+function DKP:RequestSnapshot()
+  if not IsInGuild() then return end
+  local me = ShortName(UnitName("player")) or "Unknown"
+  local nonce = tostring(time()) .. "-" .. tostring(math.random(1000, 9999))
+  self:SendMessageNow(JoinWire({"DKPSNAPREQ", SafeText(me, 20), nonce}))
+  DKPPrint("DKP snapshot requested.")
+end
+
+function DKP:ReceiveSnapshot(fields)
+  local name = ShortName(fields[2])
+  if not name or name == "" then return end
+  if not self:IsCurrentGuildMember(name) then return end
+  local incomingTimestamp = tonumber(fields[4]) or 0
+  local db = self:EnsureDB()
+  local key = Lower(name)
+  local current = db.balances[key]
+  local currentTimestamp = current and tonumber(current.updatedAt) or 0
+  if not current or incomingTimestamp > currentTimestamp then
+    db.balances[key] = {
+      name = name,
+      balance = Clamp(RoundInteger(tonumber(fields[3]) or 0), 0, self.CAP),
+      updatedAt = incomingTimestamp,
+      updatedBy = ShortName(fields[5]) or "Sync",
+      transactionId = fields[6] or "",
+    }
+    self:RefreshAll()
+  end
+end
+
 function DKP:ReceiveTransaction(fields, fromLog)
   local offset = fromLog and 1 or 0
   local transaction = {
@@ -770,13 +846,40 @@ function DKP:HandleAddonMessage(prefix, message, sender)
     if Lower(ShortName(fields[2])) == me and isSenderAdmin then
       self:ReceiveTransaction(fields, true)
     end
-  elseif kind == "DKPBEGIN" then
-    if Lower(ShortName(fields[2])) == me and isSenderAdmin then
-      DKPPrint("Receiving DKP data from " .. tostring(ShortName(fields[3]) or "an officer") .. "...")
+  elseif kind == "DKPSNAPREQ" then
+    if isSenderAdmin then
+      DKPPrint("DKP snapshot requested by " .. tostring(ShortName(fields[2]) or "a guildie") .. ".")
+      self:BroadcastSnapshot()
+    end
+  elseif kind == "DKPSNAP" then
+    if isSenderAdmin then self:ReceiveSnapshot(fields) end
+  elseif kind == "DKPSNAPLOG" then
+    if isSenderAdmin then
+      local transaction = {
+        id = fields[2],
+        operation = fields[3],
+        name = fields[4],
+        amount = tonumber(fields[5]) or 0,
+        before = tonumber(fields[6]) or 0,
+        after = tonumber(fields[7]) or 0,
+        timestamp = tonumber(fields[8]) or 0,
+        actor = fields[9],
+        reason = fields[10],
+      }
+      self:StoreTransaction(transaction, true)
+    end
+  elseif kind == "DKPSNAPBEGIN" then
+    if isSenderAdmin then
+      DKPPrint("Receiving DKP snapshot from " .. tostring(ShortName(fields[2]) or "an officer") .. "...")
     end
   elseif kind == "DKPEND" then
     if Lower(ShortName(fields[2])) == me and isSenderAdmin then
       DKPPrint("DKP synchronization complete.")
+      self:RefreshAll()
+    end
+  elseif kind == "DKPSNAPEND" then
+    if isSenderAdmin then
+      DKPPrint("DKP snapshot complete.")
       self:RefreshAll()
     end
   end
@@ -2364,6 +2467,12 @@ eventFrame:SetScript("OnEvent", function()
       RLC:ScheduleDeferred("rlc_dkp_login_sync", 8, function()
         if RLC and RLC.DKP and IsInGuild() and RLC.HasLeafAccess and RLC:HasLeafAccess() then
           RLC.DKP:RequestSync()
+          RLC.DKP:RequestSnapshot()
+        end
+      end)
+      RLC:ScheduleDeferred("rlc_dkp_admin_snapshot", 12, function()
+        if RLC and RLC.DKP and IsInGuild() and RLC.DKP:CanAnswerSync() then
+          RLC.DKP:BroadcastSnapshot()
         end
       end)
     end
