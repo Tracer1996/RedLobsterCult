@@ -1,6 +1,6 @@
 _G = _G or (getfenv and getfenv(0)) or {}
 
-LATEST_VERSION = "19.11"
+LATEST_VERSION = "19.12"
 RLC_STYLE = _G.RLC_Styles or {}
 RLC_UI_MODERN = _G.RLC_UIModernization or {}
 

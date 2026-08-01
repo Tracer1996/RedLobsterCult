@@ -1,7 +1,7 @@
 ## Interface: 11200
 ## Title: Red Lobster Cult
 ## Notes: Red Lobster Cult guild utility addon. Bulletin Board duties, weekly goals, badges, achievements, DKP, and guild tools.
-## Version: 19.11-RLC-DUTIES-LINKS
+## Version: 19.12
 ## SavedVariables: RLC_GlobalDB, RLC_AshenDossierLayout, RLC_AshenBGLayout
 ## SavedVariablesPerCharacter: RLC_DB
 

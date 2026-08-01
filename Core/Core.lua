@@ -5,7 +5,7 @@ AtlasLoot_Data = AtlasLoot_Data or {}
 RLC = RLC or {}
 RLC.name = "RedLobsterCult"
 RLC.prefix = "RLC"
-RLC.version = "19.11"
+RLC.version = "19.12"
 RLC.allianceEnabled = false
 RLC.isAllianceStandalone = false
 RLC.guildBankOwner = "Methllyy"
@@ -377,29 +377,29 @@ local SEASON_REWARD_5 = 5
 RLC.weeklyRecapNoteText = "These are the champions of the Red Lobster Cult. Stand with your guildmates, carve your legacy, and rise with the Cult."
 RLC.weeklyRecapRankMessageTemplates = {
   [1] = {
-    "%s, you led the Cult this week. %dg is yours.",
-    "%s, the summit is yours this week. Claim your %dg purse and wear the crown proudly.",
-    "%s, you stood above the rest this week. Your %dg reward is waiting for you.",
+    "%s, you led the Cult this week. %d DKP has been added to your character.",
+    "%s, the summit is yours this week. Your %d DKP reward was applied automatically.",
+    "%s, you stood above the rest this week. %d DKP is now on your character.",
   },
   [2] = {
-    "%s, an elite climb. Second place earns you %dg this week.",
-    "%s, you were right on the leader's heels. Enjoy your %dg reward for 2nd place.",
-    "%s, the Cult noticed your grind. Second place and %dg are yours.",
+    "%s, an elite climb. Second place added %d DKP to your character.",
+    "%s, you were right on the leader's heels. Your %d DKP reward was applied automatically.",
+    "%s, the Cult noticed your grind. Second place placed %d DKP on your character.",
   },
   [3] = {
-    "%s, a strong finish. Third place brings you %dg this week.",
-    "%s, your path was sharp this week. Third place and %dg are well earned.",
-    "%s, you carved out a podium finish. Claim your %dg for 3rd place.",
+    "%s, a strong finish. Third place added %d DKP to your character.",
+    "%s, your path was sharp this week. Your %d DKP reward was applied automatically.",
+    "%s, you carved out a podium finish. %d DKP is now on your character.",
   },
   [4] = {
-    "%s, you broke into the champions board. Fourth place earns you %dg.",
-    "%s, the top five is no small feat. Enjoy your %dg reward for 4th place.",
-    "%s, you stayed in the hunt all week. Fourth place and %dg are yours.",
+    "%s, you broke into the champions board. Fourth place added %d DKP to your character.",
+    "%s, the top five is no small feat. Your %d DKP reward was applied automatically.",
+    "%s, you stayed in the hunt all week. %d DKP is now on your character.",
   },
   [5] = {
-    "%s, you claimed the final champions spot this week. %dg are yours.",
-    "%s, top five secured. Enjoy your %dg reward for holding the line.",
-    "%s, you earned your place among the Cult's finest. Claim your %dg.",
+    "%s, you claimed the final champions spot this week. %d DKP has been added to your character.",
+    "%s, top five secured. Your %d DKP reward was applied automatically.",
+    "%s, you earned your place among the Cult's finest. %d DKP is now on your character.",
   },
 }
 
@@ -1601,7 +1601,7 @@ function RLC:FormatSeasonGoldReward(amount)
   if value <= 0 then
     return "No DKP"
   end
-  return tostring(value) .. " dkp"
+  return tostring(value) .. " DKP"
 end
 
 
@@ -1646,7 +1646,7 @@ function RLC:FormatSeasonGoldReward(amount)
   if value <= 0 then
     return "No DKP"
   end
-  return tostring(value) .. " dkp"
+  return tostring(value) .. " DKP"
 end
 
 local function EncodeTalentField(text)
@@ -13421,7 +13421,7 @@ function RLC:GetVisibleGuildEvents(mode)
         local myRSVP = me and self:FindGuildEventRSVP(eventRecord.id, me) or nil
         isVisible = isVisible and myRSVP ~= nil and NormalizeRaidSignupStatus(myRSVP.signupStatus) ~= "unavailable"
       end
-      if isVisible and ((tonumber(eventRecord.startAt) or 0) + (14 * SECONDS_PER_DAY)) >= now then
+      if isVisible and ((tonumber(eventRecord.startAt) or 0) + (30 * SECONDS_PER_DAY)) >= now then
         table.insert(rows, eventRecord)
       end
     end
@@ -15666,31 +15666,63 @@ function RLC:GetWeeklyRecapRewards()
 end
 
 function RLC:ApplyWeeklyRecapDKP(wk, snapshot)
-  if not (RLC and RLC.DKP and RLC.DKP.StoreTransaction) then return end
-  if not (RLC.IsAdminRank and RLC:IsAdminRank()) then return end
+  if not (RLC and RLC.DKP and RLC.DKP.StoreTransaction and RLC.DKP.EnsureDB) then return false end
+  if not (RLC.IsAdminRank and RLC:IsAdminRank()) then return false end
+  if type(snapshot) ~= "table" or type(snapshot.entries) ~= "table" then return false end
+
+  local dkpDB = RLC.DKP:EnsureDB()
   local ordinals = {"1st", "2nd", "3rd", "4th", "5th"}
+  local allApplied = true
+
   for i = 1, table.getn(snapshot.entries or {}) do
     local entry = snapshot.entries[i]
     if entry and entry.name and (tonumber(entry.reward) or 0) > 0 then
       local name = ShortName(entry.name)
-      local currentBalance = tonumber(RLC.DKP:GetBalance(name)) or 0
       local reward = tonumber(entry.reward) or 0
-      local after = currentBalance + reward
-      if after > RLC.DKP.CAP then after = RLC.DKP.CAP end
-      local tx = {
-        id = "WEEKLY:" .. tostring(wk) .. ":R" .. tostring(entry.rank or i) .. ":" .. name,
-        operation = "ADD",
-        name = name,
-        amount = reward,
-        before = currentBalance,
-        after = after,
-        timestamp = Now(),
-        actor = "WeeklyRecap",
-        reason = "Weekly season reward (" .. tostring(ordinals[entry.rank or i] or (entry.rank or i)) .. ")",
-      }
-      RLC.DKP:StoreTransaction(tx, false)
+      local txId = "WEEKLY:" .. tostring(wk) .. ":R" .. tostring(entry.rank or i) .. ":" .. tostring(name or "Unknown")
+
+      if not (dkpDB.seenTransactions and dkpDB.seenTransactions[txId]) then
+        local currentBalance = tonumber(RLC.DKP:GetBalance(name)) or 0
+        local after = currentBalance + reward
+        if after > RLC.DKP.CAP then after = RLC.DKP.CAP end
+        local appliedAmount = after - currentBalance
+        local tx = {
+          id = txId,
+          operation = "ADD",
+          name = name,
+          amount = appliedAmount,
+          before = currentBalance,
+          after = after,
+          timestamp = Now(),
+          actor = "WeeklyRecap",
+          reason = "Automatic weekly reward (" .. tostring(ordinals[entry.rank or i] or (entry.rank or i)) .. ")",
+        }
+        RLC.DKP:StoreTransaction(tx, false)
+      end
+
+      if not (dkpDB.seenTransactions and dkpDB.seenTransactions[txId]) then
+        allApplied = false
+      end
     end
   end
+
+  return allApplied
+end
+
+function RLC:EnsureWeeklyRecapDKPApplied(wk, snapshot)
+  if type(snapshot) ~= "table" then return false end
+  -- Admin clients are the authority for DKP writes. Always validate the
+  -- deterministic weekly transaction IDs on an admin, even when an older
+  -- snapshot was already marked applied; this repairs snapshots created by
+  -- builds that set the flag before the DKP transaction was actually stored.
+  if RLC.IsAdminRank and RLC:IsAdminRank() then
+    local applied = self:ApplyWeeklyRecapDKP(wk, snapshot)
+    if applied then
+      snapshot.dkpApplied = true
+    end
+    return applied
+  end
+  return snapshot.dkpApplied == true
 end
 
 function GetWeeklyRecapMessageVariantIndex(seedText, variantCount)
@@ -15756,7 +15788,7 @@ function RLC:BuildWeeklyRecapPopupMessage(playerName, snapshot)
   local lines = {
     "|cFFD8A24ARed Lobster Cult Weekly Recap|r",
     "Last week's winner: |cFFFFD700" .. tostring(snapshot.name or "Unknown") .. "|r with |cFFFFD700" .. RLC:FormatPointDisplay(tonumber(snapshot.total) or 0, true, false) .. "|r.",
-    "Top rewards:",
+    "Top DKP rewards:",
   }
 
   for i = 1, table.getn(snapshot.entries) do
@@ -15772,6 +15804,8 @@ function RLC:BuildWeeklyRecapPopupMessage(playerName, snapshot)
     end
   end
 
+  table.insert(lines, "")
+  table.insert(lines, "|cFF88FF88DKP rewards are added automatically to each winning character. Nothing needs to be claimed.|r")
   table.insert(lines, "")
   table.insert(lines, tostring(RLC.weeklyRecapNoteText or "These are the champions of the Red Lobster Cult."))
 
@@ -15839,6 +15873,9 @@ function RLC:MaybeShowWeeklyRecapPopup(force)
   if type(snapshot) ~= "table" or type(snapshot.entries) ~= "table" or table.getn(snapshot.entries) < 1 then
     snapshot = self:SnapshotWeeklyLeaderboardWinner(previousWeekKey, Now(), true)
   end
+  if type(snapshot) == "table" then
+    self:EnsureWeeklyRecapDKPApplied(previousWeekKey, snapshot)
+  end
   if type(snapshot) ~= "table" or type(snapshot.entries) ~= "table" or table.getn(snapshot.entries) < 1 then
     return false
   end
@@ -15875,6 +15912,7 @@ function RLC:SnapshotWeeklyLeaderboardWinner(wk, capturedAt, forceReplace)
       recap.lastWinner = existing
       recap.lastWinnerWeek = wk
     end
+    self:EnsureWeeklyRecapDKPApplied(wk, existing)
     return existing
   end
 
@@ -15917,8 +15955,7 @@ function RLC:SnapshotWeeklyLeaderboardWinner(wk, capturedAt, forceReplace)
   }
 
   if not snapshot.dkpApplied then
-    snapshot.dkpApplied = true
-    self:ApplyWeeklyRecapDKP(wk, snapshot)
+    self:EnsureWeeklyRecapDKPApplied(wk, snapshot)
   end
 
   recap.byWeek[wk] = snapshot
@@ -45671,13 +45708,54 @@ function RLC_GuildEventUIBuildDayMap(eventRows)
   return dayMap
 end
 
+function RLC_GuildEventUIBuildAgendaRows(eventRows)
+  local upcoming = {}
+  local recentPast = {}
+  local now = Now()
+
+  for _, eventRecord in ipairs(eventRows or {}) do
+    if type(eventRecord) == "table" then
+      if (tonumber(eventRecord.startAt) or 0) >= now then
+        table.insert(upcoming, eventRecord)
+      else
+        table.insert(recentPast, eventRecord)
+      end
+    end
+  end
+
+  table.sort(upcoming, function(a, b)
+    return (tonumber(a.startAt) or 0) < (tonumber(b.startAt) or 0)
+  end)
+  table.sort(recentPast, function(a, b)
+    return (tonumber(a.startAt) or 0) > (tonumber(b.startAt) or 0)
+  end)
+
+  local rows = {}
+  for _, eventRecord in ipairs(upcoming) do table.insert(rows, eventRecord) end
+  for _, eventRecord in ipairs(recentPast) do table.insert(rows, eventRecord) end
+  return rows
+end
+
+function RLC_GuildEventUINavigateToEvent(panel, eventRecord)
+  if not panel or type(eventRecord) ~= "table" then return end
+  local startAt = tonumber(eventRecord.startAt) or 0
+  local eventDate = date("*t", startAt)
+  if eventDate then
+    panel.viewYear = eventDate.year
+    panel.viewMonth = eventDate.month
+    panel.selectedDayKey = DayKeyFromTS(startAt)
+  end
+  panel.selectedEventId = eventRecord.id
+  panel.lastDetailEventId = nil
+end
+
 function BuildGuildEventsPanel(panel)
   if not panel or panel.isGuildEventBuilt then return end
 
   panel.isGuildEventBuilt = true
   panel.mode = "upcoming"
   panel.eventOffset = 0
-  panel.eventVisibleRows = 7
+  panel.eventVisibleRows = 3
 
   panel.modeUpcomingBtn = CreateWorkOrderModeButton(panel, "Upcoming")
   panel.modeUpcomingBtn:SetWidth(96)
@@ -45685,6 +45763,7 @@ function BuildGuildEventsPanel(panel)
   panel.modeUpcomingBtn.ownerPanel = panel
   panel.modeUpcomingBtn:SetScript("OnClick", function()
     this.ownerPanel.mode = "upcoming"
+    this.ownerPanel.eventOffset = 0
     this.ownerPanel.lastDetailEventId = nil
     RLC.UI:RefreshGuildEventsPanel(true)
   end)
@@ -45695,6 +45774,7 @@ function BuildGuildEventsPanel(panel)
   panel.modeMineBtn.ownerPanel = panel
   panel.modeMineBtn:SetScript("OnClick", function()
     this.ownerPanel.mode = "mine"
+    this.ownerPanel.eventOffset = 0
     this.ownerPanel.lastDetailEventId = nil
     RLC.UI:RefreshGuildEventsPanel(true)
   end)
@@ -45818,6 +45898,11 @@ function BuildGuildEventsPanel(panel)
         if panel.dateInput then panel.dateInput:SetText(this.dayKey or "") end
         if panel.startInput then panel.startInput:SetText("20:00") end
       end
+      local clickYear, clickMonth = string.match(tostring(this.dayKey or ""), "^(%d%d%d%d)%-(%d%d)%-%d%d$")
+      if clickYear and clickMonth then
+        panel.viewYear = tonumber(clickYear)
+        panel.viewMonth = tonumber(clickMonth)
+      end
       panel.selectedDayKey = this.dayKey
       panel.selectedEventId = this.primaryEventId
       panel.lastDetailEventId = nil
@@ -45827,8 +45912,12 @@ function BuildGuildEventsPanel(panel)
     lastCell = cell
   end
 
+  panel.eventListTitle = panel.listPane:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+  panel.eventListTitle:SetPoint("TOPLEFT", panel.calendarFrame, "BOTTOMLEFT", 0, -8)
+  panel.eventListTitle:SetText("|cFFFFD700Event Agenda|r  |cFF888888Upcoming and last 30 days|r")
+
   panel.eventListFrame = CreateFrame("Frame", nil, panel.listPane)
-  panel.eventListFrame:SetPoint("TOPLEFT", panel.calendarFrame, "BOTTOMLEFT", 0, -10)
+  panel.eventListFrame:SetPoint("TOPLEFT", panel.eventListTitle, "BOTTOMLEFT", 0, -5)
   panel.eventListFrame:SetPoint("BOTTOMRIGHT", panel.listPane, "BOTTOMRIGHT", -10, 10)
   panel.eventListFrame:EnableMouse(true)
   panel.eventListFrame:EnableMouseWheel(true)
@@ -45836,7 +45925,7 @@ function BuildGuildEventsPanel(panel)
   panel.eventListFrame:SetScript("OnMouseWheel", function()
     local owner = this.ownerPanel
     local totalRows = table.getn(owner.visibleEvents or {})
-    local maxOffset = math.max(0, totalRows - (owner.eventVisibleRows or 7))
+    local maxOffset = math.max(0, totalRows - (owner.eventVisibleRows or 3))
     local nextOffset = (owner.eventOffset or 0) - (arg1 or 0)
     if nextOffset < 0 then nextOffset = 0 end
     if nextOffset > maxOffset then nextOffset = maxOffset end
@@ -45850,7 +45939,7 @@ function BuildGuildEventsPanel(panel)
   local lastRow = nil
   for i = 1, panel.eventVisibleRows do
     local row = CreateFrame("Button", nil, panel.eventListFrame)
-    row:SetHeight(62)
+    row:SetHeight(40)
     row:SetBackdrop({
       bgFile = "Interface\\Tooltips\\UI-Tooltip-Background",
       edgeFile = "Interface\\Tooltips\\UI-Tooltip-Border",
@@ -45863,18 +45952,17 @@ function BuildGuildEventsPanel(panel)
     row:SetPoint("TOPRIGHT", lastRow or panel.eventListFrame, lastRow and "BOTTOMRIGHT" or "TOPRIGHT", 0, lastRow and -6 or 0)
     row.ownerPanel = panel
     row.titleText = row:CreateFontString(nil, "OVERLAY", "GameFontNormal")
-    row.titleText:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -8)
+    row.titleText:SetPoint("TOPLEFT", row, "TOPLEFT", 8, -5)
     row.titleText:SetPoint("RIGHT", row, "RIGHT", -8, 0)
     row.titleText:SetJustifyH("LEFT")
     row.metaText = row:CreateFontString(nil, "OVERLAY", "GameFontHighlightSmall")
-    row.metaText:SetPoint("TOPLEFT", row.titleText, "BOTTOMLEFT", 0, -4)
+    row.metaText:SetPoint("TOPLEFT", row.titleText, "BOTTOMLEFT", 0, -2)
     row.metaText:SetPoint("RIGHT", row, "RIGHT", -8, 0)
     row.metaText:SetJustifyH("LEFT")
     row.metaText:SetJustifyV("TOP")
     row:SetScript("OnClick", function()
       if not this.eventRecord then return end
-      this.ownerPanel.selectedEventId = this.eventRecord.id
-      this.ownerPanel.lastDetailEventId = nil
+      RLC_GuildEventUINavigateToEvent(this.ownerPanel, this.eventRecord)
       RLC.UI:RefreshGuildEventsPanel(true)
     end)
     panel.eventRows[i] = row
@@ -46218,6 +46306,9 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
     panel.monthNextBtn:Hide()
     for i = 1, table.getn(panel.calendarDayHeaders or {}) do panel.calendarDayHeaders[i]:Hide() end
     panel.calendarFrame:Hide()
+    if panel.eventListTitle then panel.eventListTitle:Hide() end
+    panel.eventListFrame:Hide()
+    panel.noEventsText:Hide()
     panel.dayEventsTitle:Hide()
     panel.dayEventsFrame:Hide()
     panel.signupNoteBG:Hide()
@@ -46258,6 +46349,8 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
   panel.monthNextBtn:Show()
   for i = 1, table.getn(panel.calendarDayHeaders or {}) do panel.calendarDayHeaders[i]:Show() end
   panel.calendarFrame:Show()
+  if panel.eventListTitle then panel.eventListTitle:Show() end
+  panel.eventListFrame:Show()
   panel.dayEventsTitle:Show()
   panel.dayEventsFrame:Show()
   panel.managerOpenBtn:Show()
@@ -46284,7 +46377,8 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
   panel.createEventBtn:Hide()
 
   local eventRows = RLC:GetVisibleGuildEvents(panel.mode == "mine" and "mine" or "all")
-  panel.visibleEvents = eventRows
+  local agendaRows = RLC_GuildEventUIBuildAgendaRows(eventRows)
+  panel.visibleEvents = agendaRows
   panel.summaryText:SetText(panel.mode == "mine" and ("|cFF88CCFFMy Guild Events|r  " .. tostring(table.getn(eventRows)) .. " events with your RSVP saved.") or ("|cFF88CCFFGuild Events|r  " .. tostring(table.getn(eventRows)) .. " events cached across the guild."))
   panel.listTitle:SetText(panel.mode == "mine" and "|cFFFFD700My RSVP Calendar|r" or "|cFFFFD700Guild Event Calendar|r")
 
@@ -46294,7 +46388,7 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
   local calendarFrameWidth = listPaneWidth - 20
   local cellSpacing = 2
   local cellWidth = math.floor((calendarFrameWidth - (6 * cellSpacing)) / 7)
-  local cellHeight = 68
+  local cellHeight = 52
   calendarFrameWidth = (cellWidth * 7) + (6 * cellSpacing)
   local calendarFrameHeight = (cellHeight * 6) + (5 * cellSpacing)
 
@@ -46321,9 +46415,35 @@ function RLC.UI:RefreshGuildEventsPanel(skipRequest)
     panel.calendarCells[i]:SetHeight(cellHeight)
   end
 
-  -- Hide the legacy event list; events are now shown inside calendar cells.
-  panel.eventListFrame:Hide()
-  panel.noEventsText:Hide()
+  -- Outlook-style agenda below the month grid. It keeps upcoming events first,
+  -- followed by the most recent events from the last 30 days.
+  panel.eventListFrame:Show()
+  local maxAgendaOffset = math.max(0, table.getn(agendaRows) - (panel.eventVisibleRows or 3))
+  if (panel.eventOffset or 0) > maxAgendaOffset then panel.eventOffset = maxAgendaOffset end
+  if (panel.eventOffset or 0) < 0 then panel.eventOffset = 0 end
+  panel.noEventsText:SetText(table.getn(agendaRows) == 0 and "|cFF888888No guild events are cached for the last 30 days or upcoming.|r" or "")
+  if table.getn(agendaRows) == 0 then panel.noEventsText:Show() else panel.noEventsText:Hide() end
+  for i = 1, table.getn(panel.eventRows or {}) do
+    local row = panel.eventRows[i]
+    local eventRecord = agendaRows[(panel.eventOffset or 0) + i]
+    if row and eventRecord then
+      local counts = RLC:GetGuildEventResponseCounts(eventRecord.id)
+      local eventColor = RLC_GuildEventCategoryColor[NormalizeGuildEventCategory(eventRecord.category)] or "88CCFF"
+      local dateText = date("%b %d, %H:%M", tonumber(eventRecord.startAt) or 0)
+      local statusText = RLC_RaidUIGetStatusMarkup(eventRecord.status)
+      local pastText = ((tonumber(eventRecord.startAt) or 0) < Now()) and "  |cFFAAAAAAPast|r" or ""
+      row.eventRecord = eventRecord
+      row.titleText:SetText("|cFF" .. eventColor .. tostring(eventRecord.title or "Guild Event") .. "|r")
+      row.metaText:SetText("|cFFFFFFFF" .. dateText .. "|r  " .. tostring(eventRecord.category or "Event") .. "  |cFF88FF88" .. tostring(counts.going or 0) .. " going|r  " .. statusText .. pastText)
+      local isSelected = tostring(eventRecord.id or "") == tostring(panel.selectedEventId or "")
+      row:SetBackdropColor(isSelected and 0.12 or 0.06, isSelected and 0.10 or 0.06, isSelected and 0.06 or 0.08, 0.92)
+      row:SetBackdropBorderColor(isSelected and 1.00 or 0.28, isSelected and 0.84 or 0.28, isSelected and 0.18 or 0.34, isSelected and 0.98 or 0.82)
+      row:Show()
+    elseif row then
+      row.eventRecord = nil
+      row:Hide()
+    end
+  end
 
   local today = date("*t")
   if not panel.viewYear or not panel.viewMonth then
